@@ -1,0 +1,93 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+backend/firebase-service-account.json
+ficct-*-firebase-adminsdk-*.json
+
+# Node / Angular
+node_modules/
+frontend/node_modules/
+.angular/
+frontend/.angular/
+dist/
+frontend/dist/
+.sass-cache/
+frontend/.sass-cache/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Python / FastAPI
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.eggs/
+*.egg-info/
+pip-wheel-metadata/
+.venv/
+.venv.test/
+.venv.broken/
+venv/
+env/
+ENV/
+.python-version
+backend/.venv/
+backend/.venv.test/
+backend/.venv.broken/
+backend/.pytest_cache/
+backend/app/__pycache__/
+
+# Local generated assets
+backend/uploads/
+uploads/
+logs/
+*.log
+*.pid
+*.pid.lock
+*.seed
+report.*.json
+
+# Build, caches and temp files
+.cache/
+.parcel-cache/
+.tmp/
+tmp/
+site/
+
+# Databases and backups
+*.sqlite3
+*.db
+*.bak
+*.dump
+
+# Docker / local infra
+postgres_data/
+docker-compose.override.yml
+ops/*.work
+
+# IDE / OS
+.vscode/
+.vscode-test/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
