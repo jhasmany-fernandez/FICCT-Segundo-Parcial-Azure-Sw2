@@ -1,0 +1,14 @@
+services:
+  vm1-nest-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vm1-nest-gateway
+    restart: unless-stopped
+    environment:
+      PORT: 3010
+      VM2_BASE_URL: http://34.122.37.25
+      VM2_API_URL: http://34.122.37.25/api
+      VM2_GRAPHQL_URL: http://34.122.37.25/graphql
+    ports:
+      - "3010:3010"

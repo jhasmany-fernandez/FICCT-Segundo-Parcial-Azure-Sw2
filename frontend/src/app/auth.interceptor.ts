@@ -6,10 +6,13 @@ import { throwError } from 'rxjs';
 
 import { clearStoredSession, getStoredSession } from './session';
 
+const SKIP_AUTH_REDIRECT_HEADER = 'X-Skip-Auth-Redirect';
+
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const router = inject(Router);
   const token = getStoredSession()?.accessToken?.trim();
 
+  const skipAuthRedirect = req.headers.get(SKIP_AUTH_REDIRECT_HEADER) === 'true';
   const request = !token || req.headers.has('Authorization')
     ? req
     : req.clone({
@@ -22,7 +25,7 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
     catchError((error: unknown) => {
       if (error instanceof HttpErrorResponse && error.status === 401) {
         clearStoredSession();
-        if (router.url !== '/login') {
+        if (!skipAuthRedirect && router.url !== '/login') {
           router.navigateByUrl('/login');
         }
       }

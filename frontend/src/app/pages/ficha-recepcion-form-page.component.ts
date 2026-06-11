@@ -29,7 +29,7 @@ import {
       </section>
 
       <section class="card" *ngIf="accessDenied">
-        <p class="error">Solo admin y secretaria pueden crear fichas.</p>
+        <p class="error">{{ accessDeniedMessage }}</p>
       </section>
 
       <section class="card" *ngIf="!accessDenied">
@@ -221,6 +221,10 @@ export class FichaRecepcionFormPageComponent implements OnInit {
 
   get accessDenied(): boolean {
     return this.role !== 'admin' && this.role !== 'secretaria';
+  }
+
+  get accessDeniedMessage(): string {
+    return 'Solo admin y secretaria pueden crear fichas.';
   }
 
   get selectedClient(): FichaRecepcionClientOption | null {

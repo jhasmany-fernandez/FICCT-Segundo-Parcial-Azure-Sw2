@@ -38,7 +38,7 @@ export type SucursalInputPayload = {
   estado?: string;
 };
 
-// ── Tipos internos del response GraphQL (camelCase de Strawberry) ────────────
+// ── Tipos internos del response GraphQL (snake_case real del schema) ─────────
 type GqlSucursal = {
   id: number;
   nombre: string;
@@ -48,11 +48,11 @@ type GqlSucursal = {
   email: string | null;
   latitud: number | null;
   longitud: number | null;
-  horarioAtencion: string | null;
+  horario_atencion: string | null;
   responsable: string | null;
   estado: string;
-  fechaRegistro: string;
-  fechaModificacion: string | null;
+  fecha_registro: string;
+  fecha_modificacion: string | null;
 };
 
 type GqlResponse<T> = {
@@ -63,13 +63,13 @@ type GqlResponse<T> = {
 // Fragmento reutilizable con todos los campos
 const SUCURSAL_FIELDS = `
   id nombre direccion zona telefono email
-  latitud longitud horarioAtencion responsable
-  estado fechaRegistro fechaModificacion
+  latitud longitud horario_atencion responsable
+  estado fecha_registro fecha_modificacion
 `;
 
 const SUCURSAL_FIELDS_SHORT = `id nombre estado`;
 
-// ── Mapeo camelCase GQL → snake_case Sucursal ────────────────────────────────
+// ── Mapeo snake_case GQL → snake_case Sucursal ───────────────────────────────
 function gqlToSucursal(g: GqlSucursal): Sucursal {
   return {
     id: g.id,
@@ -80,15 +80,15 @@ function gqlToSucursal(g: GqlSucursal): Sucursal {
     email: g.email ?? null,
     latitud: g.latitud ?? null,
     longitud: g.longitud ?? null,
-    horario_atencion: g.horarioAtencion ?? null,
+    horario_atencion: g.horario_atencion ?? null,
     responsable: g.responsable ?? null,
     estado: g.estado as SucursalEstado,
-    fecha_registro: g.fechaRegistro ?? '',
-    fecha_modificacion: g.fechaModificacion ?? null,
+    fecha_registro: g.fecha_registro ?? '',
+    fecha_modificacion: g.fecha_modificacion ?? null,
   };
 }
 
-// ── Mapeo snake_case payload → camelCase GQL input ───────────────────────────
+// ── Mapeo snake_case payload → snake_case GQL input ───────────────────────────
 function payloadToGqlInput(p: SucursalInputPayload): Record<string, unknown> {
   return {
     nombre: p.nombre,
@@ -98,7 +98,7 @@ function payloadToGqlInput(p: SucursalInputPayload): Record<string, unknown> {
     email: p.email ?? null,
     latitud: p.latitud ?? null,
     longitud: p.longitud ?? null,
-    horarioAtencion: p.horario_atencion ?? null,
+    horario_atencion: p.horario_atencion ?? null,
     responsable: p.responsable ?? null,
     estado: p.estado ?? 'ACTIVO',
   };
@@ -155,46 +155,46 @@ export class SucursalGraphqlService {
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   crearSucursal(input: SucursalInputPayload): Observable<Sucursal> {
-    return this.post<{ crearSucursal: GqlSucursal }>({
+    return this.post<{ crear_sucursal: GqlSucursal }>({
       query: `
         mutation CrearSucursal($input: SucursalInput!) {
-          crearSucursal(input: $input) { ${SUCURSAL_FIELDS} }
+          crear_sucursal(input: $input) { ${SUCURSAL_FIELDS} }
         }
       `,
       variables: { input: payloadToGqlInput(input) },
-    }).pipe(map((data) => gqlToSucursal(data.crearSucursal)));
+    }).pipe(map((data) => gqlToSucursal(data.crear_sucursal)));
   }
 
   actualizarSucursal(id: number, input: SucursalInputPayload): Observable<Sucursal> {
-    return this.post<{ actualizarSucursal: GqlSucursal }>({
+    return this.post<{ actualizar_sucursal: GqlSucursal }>({
       query: `
         mutation ActualizarSucursal($id: Int!, $input: SucursalInput!) {
-          actualizarSucursal(id: $id, input: $input) { ${SUCURSAL_FIELDS} }
+          actualizar_sucursal(id: $id, input: $input) { ${SUCURSAL_FIELDS} }
         }
       `,
       variables: { id, input: payloadToGqlInput(input) },
-    }).pipe(map((data) => gqlToSucursal(data.actualizarSucursal)));
+    }).pipe(map((data) => gqlToSucursal(data.actualizar_sucursal)));
   }
 
   cambiarEstadoSucursal(id: number, estado: string): Observable<Sucursal> {
-    return this.post<{ cambiarEstadoSucursal: GqlSucursal }>({
+    return this.post<{ cambiar_estado_sucursal: GqlSucursal }>({
       query: `
         mutation CambiarEstadoSucursal($id: Int!, $estado: String!) {
-          cambiarEstadoSucursal(id: $id, estado: $estado) { ${SUCURSAL_FIELDS_SHORT} }
+          cambiar_estado_sucursal(id: $id, estado: $estado) { ${SUCURSAL_FIELDS_SHORT} }
         }
       `,
       variables: { id, estado },
-    }).pipe(map((data) => gqlToSucursal(data.cambiarEstadoSucursal)));
+    }).pipe(map((data) => gqlToSucursal(data.cambiar_estado_sucursal)));
   }
 
   eliminarSucursal(id: number): Observable<boolean> {
-    return this.post<{ eliminarSucursal: boolean }>({
+    return this.post<{ eliminar_sucursal: boolean }>({
       query: `
         mutation EliminarSucursal($id: Int!) {
-          eliminarSucursal(id: $id)
+          eliminar_sucursal(id: $id)
         }
       `,
       variables: { id },
-    }).pipe(map((data) => data.eliminarSucursal));
+    }).pipe(map((data) => data.eliminar_sucursal));
   }
 }

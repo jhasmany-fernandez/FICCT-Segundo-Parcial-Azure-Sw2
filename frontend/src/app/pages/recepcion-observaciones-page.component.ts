@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
@@ -22,10 +22,14 @@ import { ObservacionWorkStatus, RecepcionesService } from '../services/recepcion
       </section>
 
       <section class="card" *ngIf="accessDenied">
-        <p class="error">Solo el rol mecánico puede registrar observaciones.</p>
+        <p class="error">{{ accessDeniedMessage }}</p>
       </section>
 
-      <form class="card form-grid" *ngIf="!accessDenied" (ngSubmit)="submit()">
+      <section class="card" *ngIf="isCheckingAccess && !accessDenied">
+        <p class="loading">Validando permisos de la recepción...</p>
+      </section>
+
+      <form class="card form-grid" *ngIf="!accessDenied && !isCheckingAccess" (ngSubmit)="submit()">
         <label class="field">
           <span>Observación</span>
           <textarea [(ngModel)]="form.observation_text" name="observation_text" required></textarea>
@@ -64,7 +68,7 @@ import { ObservacionWorkStatus, RecepcionesService } from '../services/recepcion
     @media (max-width: 768px) { .simple-shell { padding: 1rem; } .header, .actions { flex-direction: column; align-items: stretch; } }
   `],
 })
-export class RecepcionObservacionesPageComponent {
+export class RecepcionObservacionesPageComponent implements OnInit {
   private readonly recepcionesService = inject(RecepcionesService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -73,6 +77,8 @@ export class RecepcionObservacionesPageComponent {
   readonly recepcionId = Number(this.route.snapshot.paramMap.get('id'));
   readonly workStatusOptions: ObservacionWorkStatus[] = ['pendiente', 'en_proceso', 'pausado', 'completado'];
   accessDenied = this.session?.role !== 'mecanico';
+  accessDeniedMessage = 'Solo el rol mecánico puede registrar observaciones.';
+  isCheckingAccess = false;
   isLoading = false;
   errorMessage = '';
 
@@ -81,8 +87,20 @@ export class RecepcionObservacionesPageComponent {
     work_status: 'en_proceso' as ObservacionWorkStatus,
   };
 
+  ngOnInit(): void {
+    if (this.accessDenied || !this.recepcionId) {
+      if (!this.recepcionId) {
+        this.accessDenied = true;
+        this.accessDeniedMessage = 'No se encontró la recepción solicitada.';
+      }
+      return;
+    }
+
+    this.validateReceptionAccess();
+  }
+
   submit(): void {
-    if (this.accessDenied || this.isLoading || !this.recepcionId) {
+    if (this.accessDenied || this.isLoading || this.isCheckingAccess || !this.recepcionId) {
       return;
     }
 
@@ -122,5 +140,28 @@ export class RecepcionObservacionesPageComponent {
     }
 
     return 'No se pudo guardar la observación.';
+  }
+
+  private validateReceptionAccess(): void {
+    this.isCheckingAccess = true;
+    this.errorMessage = '';
+
+    this.recepcionesService.obtenerRecepcion(this.recepcionId).subscribe({
+      next: (recepcion) => {
+        this.isCheckingAccess = false;
+
+        if (this.session?.id !== recepcion.ficha.assigned_mecanico_id) {
+          this.accessDenied = true;
+          this.accessDeniedMessage = 'No tienes permiso para esta recepción.';
+        }
+      },
+      error: (error: HttpErrorResponse) => {
+        this.isCheckingAccess = false;
+        this.accessDenied = true;
+        this.accessDeniedMessage = error.status === 403
+          ? 'No tienes permiso para esta recepción.'
+          : 'No se pudo validar la recepción solicitada.';
+      },
+    });
   }
 }

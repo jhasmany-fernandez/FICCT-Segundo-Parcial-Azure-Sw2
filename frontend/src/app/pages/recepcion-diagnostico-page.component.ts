@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
@@ -22,10 +22,14 @@ import { RecepcionesService } from '../services/recepciones.service';
       </section>
 
       <section class="card" *ngIf="accessDenied">
-        <p class="error">Solo el rol mecánico puede registrar diagnósticos.</p>
+        <p class="error">{{ accessDeniedMessage }}</p>
       </section>
 
-      <form class="card form-grid" *ngIf="!accessDenied" (ngSubmit)="submit()">
+      <section class="card" *ngIf="isCheckingAccess && !accessDenied">
+        <p class="loading">Validando permisos de la recepción...</p>
+      </section>
+
+      <form class="card form-grid" *ngIf="!accessDenied && !isCheckingAccess" (ngSubmit)="submit()">
         <label class="field">
           <span>Diagnóstico mecánico</span>
           <textarea [(ngModel)]="form.diagnostic_text" name="diagnostic_text" required></textarea>
@@ -67,7 +71,7 @@ import { RecepcionesService } from '../services/recepciones.service';
     @media (max-width: 768px) { .simple-shell { padding: 1rem; } .header, .actions { flex-direction: column; align-items: stretch; } }
   `],
 })
-export class RecepcionDiagnosticoPageComponent {
+export class RecepcionDiagnosticoPageComponent implements OnInit {
   private readonly recepcionesService = inject(RecepcionesService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -75,6 +79,8 @@ export class RecepcionDiagnosticoPageComponent {
 
   readonly recepcionId = Number(this.route.snapshot.paramMap.get('id'));
   accessDenied = this.session?.role !== 'mecanico';
+  accessDeniedMessage = 'Solo el rol mecánico puede registrar diagnósticos.';
+  isCheckingAccess = false;
   isLoading = false;
   errorMessage = '';
 
@@ -84,8 +90,20 @@ export class RecepcionDiagnosticoPageComponent {
     estimated_cost: null as number | null,
   };
 
+  ngOnInit(): void {
+    if (this.accessDenied || !this.recepcionId) {
+      if (!this.recepcionId) {
+        this.accessDenied = true;
+        this.accessDeniedMessage = 'No se encontró la recepción solicitada.';
+      }
+      return;
+    }
+
+    this.validateReceptionAccess();
+  }
+
   submit(): void {
-    if (this.accessDenied || this.isLoading || !this.recepcionId) {
+    if (this.accessDenied || this.isLoading || this.isCheckingAccess || !this.recepcionId) {
       return;
     }
 
@@ -126,5 +144,28 @@ export class RecepcionDiagnosticoPageComponent {
     }
 
     return 'No se pudo guardar el diagnóstico.';
+  }
+
+  private validateReceptionAccess(): void {
+    this.isCheckingAccess = true;
+    this.errorMessage = '';
+
+    this.recepcionesService.obtenerRecepcion(this.recepcionId).subscribe({
+      next: (recepcion) => {
+        this.isCheckingAccess = false;
+
+        if (this.session?.id !== recepcion.ficha.assigned_mecanico_id) {
+          this.accessDenied = true;
+          this.accessDeniedMessage = 'No tienes permiso para esta recepción.';
+        }
+      },
+      error: (error: HttpErrorResponse) => {
+        this.isCheckingAccess = false;
+        this.accessDenied = true;
+        this.accessDeniedMessage = error.status === 403
+          ? 'No tienes permiso para esta recepción.'
+          : 'No se pudo validar la recepción solicitada.';
+      },
+    });
   }
 }

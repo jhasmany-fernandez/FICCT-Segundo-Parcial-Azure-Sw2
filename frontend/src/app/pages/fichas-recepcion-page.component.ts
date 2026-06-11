@@ -38,61 +38,33 @@ import { FichaRecepcionListItem, FichasRecepcionService } from '../services/fich
             </a>
           </div>
 
-          <div class="dashboard-menu-group">
+          <div class="dashboard-menu-group" *ngIf="canAccessSection('mecanicos')">
             <a class="dashboard-menu-link" routerLink="/dashboard" [queryParams]="{ section: 'mecanicos' }">
               <span class="dashboard-menu-icon">◔</span>
               <span>Mecanicos</span>
             </a>
-            <div class="dashboard-submenu">
-              <a class="dashboard-submenu-item" routerLink="/dashboard" [queryParams]="{ section: 'mecanicos' }">
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Lista de Mecanicos</span>
-                <strong>00</strong>
-              </a>
-            </div>
           </div>
 
-          <div class="dashboard-menu-group">
+          <div class="dashboard-menu-group" *ngIf="canAccessSection('clients')">
             <a class="dashboard-menu-link" routerLink="/dashboard" [queryParams]="{ section: 'clients' }">
               <span class="dashboard-menu-icon">◉</span>
               <span>Clientes</span>
             </a>
-            <div class="dashboard-submenu">
-              <a class="dashboard-submenu-item" routerLink="/dashboard" [queryParams]="{ section: 'clients' }">
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Lista de Clientes</span>
-                <strong>00</strong>
-              </a>
-            </div>
           </div>
 
-          <div class="dashboard-menu-group">
+          <div class="dashboard-menu-group" *ngIf="canAccessSection('emergencies')">
             <a class="dashboard-menu-link" routerLink="/dashboard" [queryParams]="{ section: 'emergencies' }">
               <span class="dashboard-menu-icon">⬒</span>
               <span>Emergencias</span>
               <span class="dashboard-menu-badge">24/7</span>
             </a>
-            <div class="dashboard-submenu">
-              <a class="dashboard-submenu-item" routerLink="/dashboard" [queryParams]="{ section: 'emergencies' }">
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Solicitudes de emergencia</span>
-                <strong>00</strong>
-              </a>
-            </div>
           </div>
 
-          <div class="dashboard-menu-group">
+          <div class="dashboard-menu-group" *ngIf="canAccessSection('reports')">
             <a class="dashboard-menu-link" routerLink="/dashboard" [queryParams]="{ section: 'reports' }">
               <span class="dashboard-menu-icon">▥</span>
               <span>Reportes</span>
             </a>
-            <div class="dashboard-submenu">
-              <a class="dashboard-submenu-item" routerLink="/dashboard" [queryParams]="{ section: 'reports' }">
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Trabajos realizados</span>
-                <strong>00</strong>
-              </a>
-            </div>
           </div>
         </nav>
 
@@ -209,11 +181,6 @@ import { FichaRecepcionListItem, FichasRecepcionService } from '../services/fich
     .dashboard-menu-link.is-active { background: linear-gradient(180deg, #ffd95f 0%, #f7c93d 100%); color: #17345c; box-shadow: 0 14px 28px rgba(10, 18, 34, .24); }
     .dashboard-menu-icon { width: 1.35rem; text-align: center; opacity: .95; }
     .dashboard-menu-badge { margin-left: auto; background: rgba(202, 223, 255, .18); color: #f0f6ff; padding: .22rem .6rem; border-radius: 999px; font-size: .74rem; font-weight: 700; }
-    .dashboard-submenu { display: flex; flex-direction: column; gap: .2rem; padding-left: 1.2rem; }
-    .dashboard-submenu-item { display: flex; align-items: center; gap: .55rem; padding: .45rem 1rem .45rem 1.1rem; border-radius: .85rem; color: rgba(233,241,255,.9); text-decoration: none; }
-    .dashboard-submenu-item:hover { background: rgba(255,255,255,.06); }
-    .dashboard-submenu-item strong { margin-left: auto; font-size: .82rem; color: rgba(233,241,255,.72); }
-    .dashboard-submenu-bullet { width: .45rem; height: .45rem; border-radius: 999px; background: rgba(255,255,255,.88); flex: 0 0 auto; }
     .dashboard-sidebar-card { margin-top: auto; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.08); border-radius: 1rem; padding: 1rem; }
     .dashboard-sidebar-card span { display: block; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: rgba(233,241,255,.7); margin-bottom: .45rem; }
     .dashboard-sidebar-card strong { display: block; margin-bottom: .35rem; }
@@ -288,11 +255,23 @@ export class FichasRecepcionPageComponent implements OnInit {
   }
 
   get canCreate(): boolean {
-    return !this.accessDenied;
+    return this.role === 'admin' || this.role === 'secretaria';
   }
 
   get canAccessReceptionModule(): boolean {
     return this.role === 'admin' || this.role === 'secretaria' || this.role === 'mecanico';
+  }
+
+  canAccessSection(section: 'mecanicos' | 'clients' | 'emergencies' | 'reports'): boolean {
+    if (this.role === 'admin') {
+      return true;
+    }
+
+    if (this.role === 'secretaria') {
+      return section === 'mecanicos' || section === 'clients' || section === 'emergencies' || section === 'reports';
+    }
+
+    return false;
   }
 
   get userDisplayName(): string {

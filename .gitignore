@@ -2,18 +2,24 @@
 .env
 .env.*
 !.env.example
+!backend/.env.example
+!frontend/.env.example
 backend/.env
 frontend/.env
 backend/firebase-service-account.json
 ficct-*-firebase-adminsdk-*.json
 
-# Node / Angular
+# Node / Angular / NestJS
 node_modules/
 frontend/node_modules/
+backend/node_modules/
+vm1-nest-gateway/node_modules/
 .angular/
 frontend/.angular/
 dist/
 frontend/dist/
+backend/dist/
+vm1-nest-gateway/dist/
 .sass-cache/
 frontend/.sass-cache/
 coverage/
@@ -54,6 +60,9 @@ backend/.venv.test/
 backend/.venv.broken/
 backend/.pytest_cache/
 backend/app/__pycache__/
+backend/core-service/.venv/
+backend/core-service/.pytest_cache/
+backend/core-service/app/__pycache__/
 
 # Local generated assets
 backend/uploads/

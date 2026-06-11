@@ -1,10 +1,39 @@
 import { CommonModule } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { AfterViewInit, Component, ElementRef, ViewChild, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+
 import { API_BASE_URL } from '../api-base';
+import { getStoredSession } from '../session';
 
 declare const L: any;
+
+type WorkshopMapApiItem = {
+  id?: number | string | null;
+  nombre?: string | null;
+  workshop_name?: string | null;
+  contact_name?: string | null;
+  responsable?: string | null;
+  phone?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  zone?: string | null;
+  zona?: string | null;
+  specialty?: string | null;
+  especialidad?: string | null;
+  latitud?: number | string | null;
+  longitud?: number | string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  lat?: number | string | null;
+  lng?: number | string | null;
+  timezone?: string | null;
+  utc_offset_minutes?: number | null;
+  created_at?: string | null;
+  fecha_registro?: string | null;
+};
+
+const SKIP_AUTH_REDIRECT_HEADER = 'X-Skip-Auth-Redirect';
 
 type WorkshopMapItem = {
   id: number;
@@ -117,7 +146,7 @@ type WorkshopMapItem = {
 })
 export class MapPageComponent implements AfterViewInit {
   private readonly http = inject(HttpClient);
-  private readonly workshopsApiUrl = `${API_BASE_URL}/workshops`;
+  private readonly workshopsApiUrl = `${API_BASE_URL}/sucursales`;
 
   @ViewChild('mapCanvas', { static: true })
   private readonly mapCanvasRef?: ElementRef<HTMLDivElement>;
@@ -182,16 +211,23 @@ export class MapPageComponent implements AfterViewInit {
     this.isLoading = true;
     this.loadError = '';
 
-    this.http.get<WorkshopMapItem[]>(this.workshopsApiUrl).subscribe({
+    this.http.get<WorkshopMapApiItem[]>(this.workshopsApiUrl, { headers: this.getRequestHeaders() }).subscribe({
       next: (workshops) => {
-        this.workshops = workshops;
+        this.workshops = workshops.map((item, index) => this.normalizeWorkshop(item, index));
         this.renderWorkshopMarkers();
         this.isLoading = false;
         this.scheduleMapResize();
       },
-      error: () => {
+      error: (error: HttpErrorResponse) => {
         this.isLoading = false;
-        this.loadError = 'No se pudieron cargar las sucursales registradas desde la API.';
+        this.loadError = this.resolveLoadError(error);
+        console.error('MapPageComponent: error al cargar sucursales desde la API', {
+          endpoint: this.workshopsApiUrl,
+          status: error.status,
+          statusText: error.statusText,
+          detail: error.error,
+          message: error.message,
+        });
       },
     });
   }
@@ -225,9 +261,9 @@ export class MapPageComponent implements AfterViewInit {
 
       const marker = L.marker([latitude, longitude]).addTo(this.markersLayer);
       marker.bindPopup(`
-        <strong>${this.escapeHtml(workshop.specialty)}</strong><br>
-        ${this.escapeHtml(workshop.workshop_name)}<br>
-        ${this.escapeHtml(workshop.zone)}
+        <strong>${this.escapeHtml(workshop.workshop_name)}</strong><br>
+        ${this.escapeHtml(workshop.zone)}<br>
+        ${this.escapeHtml(workshop.specialty)}
       `);
 
       marker.on('click', () => {
@@ -248,6 +284,100 @@ export class MapPageComponent implements AfterViewInit {
       maxZoom: 15,
     });
     this.scheduleMapResize();
+  }
+
+  private normalizeWorkshop(item: WorkshopMapApiItem, index: number): WorkshopMapItem {
+    const latitude = this.normalizeCoordinate(item.latitud, item.latitude, item.lat);
+    const longitude = this.normalizeCoordinate(item.longitud, item.longitude, item.lng);
+    const workshopName = this.pickFirstString(item.nombre, item.workshop_name) || `Sucursal ${index + 1}`;
+    const zone = this.pickFirstString(item.zona, item.zone) || 'Sin zona';
+    const specialty =
+      this.pickFirstString(item.especialidad, item.specialty) ||
+      this.pickFirstString(item.responsable, item.contact_name) ||
+      'Sucursal registrada';
+
+    return {
+      id: this.normalizeId(item.id, index),
+      workshop_name: workshopName,
+      contact_name: this.pickFirstString(item.responsable, item.contact_name) || 'Sin responsable',
+      phone: this.pickFirstString(item.telefono, item.phone) || 'Sin teléfono',
+      email: this.pickFirstString(item.email) || 'Sin correo',
+      zone,
+      specialty,
+      latitude,
+      longitude,
+      timezone: this.pickFirstString(item.timezone),
+      utc_offset_minutes: typeof item.utc_offset_minutes === 'number' ? item.utc_offset_minutes : null,
+      created_at: this.pickFirstString(item.fecha_registro, item.created_at) || '',
+    };
+  }
+
+  private normalizeCoordinate(...values: Array<number | string | null | undefined>): number | null {
+    for (const value of values) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+      }
+
+      if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeId(value: number | string | null | undefined, index: number): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return index + 1;
+  }
+
+  private pickFirstString(...values: Array<string | null | undefined>): string | null {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+
+    return null;
+  }
+
+  private getRequestHeaders(): HttpHeaders {
+    const token = getStoredSession()?.accessToken?.trim();
+    const headers: Record<string, string> = {
+      [SKIP_AUTH_REDIRECT_HEADER]: 'true',
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return new HttpHeaders(headers);
+  }
+
+  private resolveLoadError(error: HttpErrorResponse): string {
+    if (error.status === 401) {
+      return 'Inicia sesión para ver las sucursales registradas en el mapa.';
+    }
+
+    const detail = typeof error.error?.detail === 'string' ? error.error.detail.trim() : '';
+    if (detail) {
+      return detail;
+    }
+
+    return 'No se pudieron cargar las sucursales registradas desde la API.';
   }
 
   private escapeHtml(value: string): string {

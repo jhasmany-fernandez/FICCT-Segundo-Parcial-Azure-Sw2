@@ -1,9 +1,9 @@
 import { CommonModule, DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, ElementRef, OnDestroy, ViewChild, inject } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, ViewChild, inject } from '@angular/core';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { FormsModule, NgForm } from '@angular/forms';
-import { Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { API_BASE_URL, BACKEND_BASE_URL } from '../api-base';
 import { APP_SESSION_STORAGE_KEY, AppRole, AppSession, clearStoredSession, parseStoredSession } from '../session';
 import { SucursalGraphqlService } from '../services/sucursal-graphql.service';
@@ -28,6 +28,27 @@ type SucursalEstado = 'ACTIVO' | 'INACTIVO';
 type WorkshopApprovalStatus = SucursalEstado;
 type ClientStatus = 'active' | 'suspended';
 type AuditTone = 'info' | 'success' | 'warning' | 'danger';
+
+const DASHBOARD_SECTIONS: DashboardSection[] = [
+  'dashboard',
+  'workshops',
+  'mecanicos',
+  'secretarias',
+  'clients',
+  'maintenance',
+  'emergencies',
+  'reports',
+  'audit',
+];
+
+const DASHBOARD_SECTION_ACCESS: Record<AppRole, readonly DashboardSection[]> = {
+  admin: ['dashboard', 'workshops', 'mecanicos', 'secretarias', 'clients', 'emergencies', 'reports', 'audit'],
+  secretaria: ['dashboard', 'mecanicos', 'clients', 'emergencies', 'reports'],
+  mecanico: ['dashboard'],
+  workshop: ['mecanicos', 'reports'],
+};
+
+const CLIENT_ROLES = new Set(['client', 'cliente']);
 
 const MECANICO_SPECIALTY_OPTIONS = [
   'Batería',
@@ -65,11 +86,60 @@ type DashboardStat = {
   tone: 'gold' | 'blue' | 'teal' | 'slate';
 };
 
-type DashboardItem = {
+type RecentActivityItem = {
   title: string;
   subtitle: string;
   meta: string;
-  priority: 'Alta' | 'Media' | 'Seguimiento';
+  priority: 'Alta' | 'Media' | 'Baja';
+  status: MaintenanceRequestStatus;
+};
+
+type KpiTrendCard = {
+  label: string;
+  value: string;
+  trend: string;
+  trendUp: boolean;
+  sparkline: string;
+  tone: 'teal' | 'cyan' | 'gold';
+};
+
+type KpiBarGroup = {
+  name: string;
+  total: number;
+  pendientePct: number;
+  activoPct: number;
+  cerradaPct: number;
+  rechazadoPct: number;
+};
+
+type KpiDonutSlice = {
+  label: string;
+  value: number;
+  percent: number;
+  color: string;
+};
+
+type KpiTopRow = {
+  name: string;
+  zone: string;
+  total: number;
+  revenue: number;
+};
+
+type KpiActivityPoint = {
+  hour: number;
+  leftPct: number;
+  bottomPct: number;
+  size: number;
+  color: string;
+  count: number;
+  priority: string;
+};
+
+type KpiHBar = {
+  name: string;
+  count: number;
+  pct: number;
 };
 
 type AuditItem = {
@@ -278,6 +348,30 @@ type Sucursal = {
   motivo_no_operativa?: string;
 };
 
+type SucursalApiResponse = Partial<Sucursal> & {
+  id?: number | string | null;
+  nombre?: string | null;
+  direccion?: string | null;
+  zona?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  latitud?: number | string | null;
+  longitud?: number | string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  lat?: number | string | null;
+  lng?: number | string | null;
+  horario_atencion?: string | null;
+  responsable?: string | null;
+  estado?: SucursalEstado | string | null;
+  fecha_registro?: string | null;
+  fecha_modificacion?: string | null;
+  operativa?: boolean | null;
+  motivo_no_operativa?: string | null;
+  mecanicos_activos_count?: number | null;
+  secretarias_activas_count?: number | null;
+};
+
 type Secretaria = {
   id: number;
   cliente_id: number;
@@ -420,21 +514,8 @@ type SucursalFormModel = {
             >
               <span class="dashboard-menu-icon">◫</span>
               <span>Sucursales</span>
-              <span class="dashboard-menu-badge">Live</span>
+              <span class="dashboard-menu-badge">{{ sucursales.length | number: '2.0-0' }}</span>
             </button>
-
-            <div class="dashboard-submenu">
-              <button
-                class="dashboard-submenu-item"
-                type="button"
-                [class.is-active]="selectedSection === 'workshops'"
-                (click)="selectSection('workshops')"
-              >
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Solicitudes</span>
-                <strong>{{ sucursales.length | number: '2.0-0' }}</strong>
-              </button>
-            </div>
           </div>
 
           <div class="dashboard-menu-group" *ngIf="canAccessSection('mecanicos')">
@@ -446,20 +527,8 @@ type SucursalFormModel = {
             >
               <span class="dashboard-menu-icon">◔</span>
               <span>Mecanicos</span>
+              <span class="dashboard-menu-badge">{{ mecanicos.length | number: '2.0-0' }}</span>
             </button>
-
-            <div class="dashboard-submenu">
-              <button
-                class="dashboard-submenu-item"
-                type="button"
-                [class.is-active]="selectedSection === 'mecanicos'"
-                (click)="selectSection('mecanicos')"
-              >
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Lista de Mecanicos</span>
-                <strong>{{ mecanicos.length | number: '2.0-0' }}</strong>
-              </button>
-            </div>
           </div>
 
           <div class="dashboard-menu-group" *ngIf="canAccessSection('secretarias')">
@@ -471,20 +540,8 @@ type SucursalFormModel = {
             >
               <span class="dashboard-menu-icon">◑</span>
               <span>Secretarias</span>
+              <span class="dashboard-menu-badge">{{ secretarias.length | number: '2.0-0' }}</span>
             </button>
-
-            <div class="dashboard-submenu">
-              <button
-                class="dashboard-submenu-item"
-                type="button"
-                [class.is-active]="selectedSection === 'secretarias'"
-                (click)="selectSection('secretarias')"
-              >
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Lista de Secretarias</span>
-                <strong>{{ secretarias.length | number: '2.0-0' }}</strong>
-              </button>
-            </div>
           </div>
 
           <div class="dashboard-menu-group" *ngIf="canAccessSection('clients')">
@@ -496,20 +553,8 @@ type SucursalFormModel = {
             >
               <span class="dashboard-menu-icon">◉</span>
               <span>Clientes</span>
+              <span class="dashboard-menu-badge">{{ clients.length | number: '2.0-0' }}</span>
             </button>
-
-            <div class="dashboard-submenu">
-              <button
-                class="dashboard-submenu-item"
-                type="button"
-                [class.is-active]="selectedSection === 'clients'"
-                (click)="selectSection('clients')"
-              >
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Lista de Clientes</span>
-                <strong>{{ clients.length | number: '2.0-0' }}</strong>
-              </button>
-            </div>
           </div>
 
           <div class="dashboard-menu-group" *ngIf="canAccessSection('emergencies')">
@@ -523,19 +568,6 @@ type SucursalFormModel = {
               <span>Emergencias</span>
               <span class="dashboard-menu-badge">24/7</span>
             </button>
-
-            <div class="dashboard-submenu">
-              <button
-                class="dashboard-submenu-item"
-                type="button"
-                [class.is-active]="selectedSection === 'emergencies'"
-                (click)="selectSection('emergencies')"
-              >
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Solicitudes de emergencia</span>
-                <strong>{{ maintenanceRequests.length | number: '2.0-0' }}</strong>
-              </button>
-            </div>
           </div>
 
           <div class="dashboard-menu-group" *ngIf="canAccessSection('reports')">
@@ -547,20 +579,8 @@ type SucursalFormModel = {
             >
               <span class="dashboard-menu-icon">▥</span>
               <span>Reportes</span>
+              <span class="dashboard-menu-badge">{{ reportWorkRequests.length | number: '2.0-0' }}</span>
             </button>
-
-            <div class="dashboard-submenu">
-              <button
-                class="dashboard-submenu-item"
-                type="button"
-                [class.is-active]="selectedSection === 'reports'"
-                (click)="selectSection('reports')"
-              >
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Trabajos realizados</span>
-                <strong>{{ reportWorkRequests.length | number: '2.0-0' }}</strong>
-              </button>
-            </div>
           </div>
 
           <div class="dashboard-menu-group" *ngIf="canAccessSection('audit')">
@@ -572,20 +592,8 @@ type SucursalFormModel = {
             >
               <span class="dashboard-menu-icon">▣</span>
               <span>Bitacora</span>
+              <span class="dashboard-menu-badge">{{ auditItems.length | number: '2.0-0' }}</span>
             </button>
-
-            <div class="dashboard-submenu">
-              <button
-                class="dashboard-submenu-item"
-                type="button"
-                [class.is-active]="selectedSection === 'audit'"
-                (click)="selectSection('audit')"
-              >
-                <span class="dashboard-submenu-bullet"></span>
-                <span>Actividad reciente</span>
-                <strong>{{ auditItems.length | number: '2.0-0' }}</strong>
-              </button>
-            </div>
           </div>
         </nav>
 
@@ -597,7 +605,7 @@ type SucursalFormModel = {
       </aside>
 
       <section class="dashboard-content">
-        <header class="dashboard-topbar">
+        <header class="dashboard-topbar" [class.dashboard-topbar-compact]="selectedSection === 'workshops'">
           <div class="dashboard-topbar-copy">
             <button
               class="dashboard-sidebar-toggle"
@@ -646,22 +654,159 @@ type SucursalFormModel = {
           </div>
         </header>
 
-        <section
-          class="dashboard-stats"
-          *ngIf="selectedSection === 'dashboard' || selectedSection === 'mecanicos' || selectedSection === 'clients'"
-          [class.is-compact]="selectedSection === 'mecanicos' || selectedSection === 'clients'"
-        >
-          <article class="dashboard-stat-card" *ngFor="let stat of stats" [attr.data-tone]="stat.tone">
-            <div class="dashboard-stat-top">
-              <span>{{ stat.label }}</span>
-              <small>{{ stat.trend }}</small>
+        <section class="kpi-row" *ngIf="selectedSection === 'dashboard'">
+          <article class="kpi-card" *ngFor="let card of kpiTrendCards" [attr.data-tone]="card.tone">
+            <div class="kpi-card-head">
+              <span>{{ card.label }}</span>
+              <small [class.is-down]="!card.trendUp">{{ card.trend }}</small>
             </div>
-            <strong>{{ stat.value }}</strong>
-            <p>{{ stat.detail }}</p>
+            <strong>{{ card.value }}</strong>
+            <svg class="kpi-sparkline" viewBox="0 0 100 34" preserveAspectRatio="none">
+              <polyline [attr.points]="card.sparkline"></polyline>
+            </svg>
+          </article>
+
+          <article class="kpi-card kpi-card-gauge" data-tone="orange">
+            <div class="kpi-card-head">
+              <span>Tasa de resolución</span>
+              <small>Cerradas</small>
+            </div>
+            <div class="kpi-gauge-shell">
+              <div class="kpi-gauge" [style.background]="kpiResolutionGaugeBackground"></div>
+              <div class="kpi-gauge-mask"></div>
+              <strong class="kpi-gauge-value">{{ kpiResolutionRate }}%</strong>
+            </div>
+            <p>{{ maintenanceRequests.length }} emergencias registradas</p>
           </article>
         </section>
 
         <section class="dashboard-grid">
+          <article class="dashboard-panel dashboard-panel-wide kpi-panel" *ngIf="selectedSection === 'dashboard'">
+            <div class="dashboard-panel-head">
+              <div>
+                <p class="dashboard-panel-kicker">Distribución operativa</p>
+                <h2>Emergencias por sucursal</h2>
+              </div>
+            </div>
+
+            <p class="dashboard-empty" *ngIf="!kpiZoneBars.length">
+              Aún no hay emergencias registradas para graficar.
+            </p>
+
+            <div class="kpi-bars-layout" *ngIf="kpiZoneBars.length">
+              <div class="kpi-bars">
+                <div class="kpi-bar-group" *ngFor="let bar of kpiZoneBars">
+                  <div class="kpi-bar-stack">
+                    <span class="kpi-bar-total">{{ bar.total }}</span>
+                    <div class="kpi-bar-segment" data-segment="cerrada" [style.height.%]="bar.cerradaPct"></div>
+                    <div class="kpi-bar-segment" data-segment="activo" [style.height.%]="bar.activoPct"></div>
+                    <div class="kpi-bar-segment" data-segment="pendiente" [style.height.%]="bar.pendientePct"></div>
+                    <div class="kpi-bar-segment" data-segment="rechazado" [style.height.%]="bar.rechazadoPct"></div>
+                  </div>
+                  <span class="kpi-bar-label">{{ bar.name }}</span>
+                </div>
+              </div>
+
+              <div class="kpi-table-wrap">
+                <p class="dashboard-panel-kicker">Top sucursales</p>
+                <table class="dashboard-table kpi-top-table">
+                  <thead>
+                    <tr>
+                      <th>Sucursal</th>
+                      <th>Zona</th>
+                      <th>Emergencias</th>
+                      <th>Ingresos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr *ngFor="let row of kpiTopSucursales">
+                      <td data-label="Sucursal">{{ row.name }}</td>
+                      <td data-label="Zona">{{ row.zone }}</td>
+                      <td data-label="Emergencias">{{ row.total }}</td>
+                      <td data-label="Ingresos">{{ formatReportPrice(row.revenue) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="kpi-legend" *ngIf="kpiZoneBars.length">
+              <span><i data-segment="cerrada"></i> Cerradas</span>
+              <span><i data-segment="activo"></i> Activas</span>
+              <span><i data-segment="pendiente"></i> Pendientes</span>
+              <span><i data-segment="rechazado"></i> Rechazadas</span>
+            </div>
+          </article>
+
+          <article class="dashboard-panel kpi-panel" *ngIf="selectedSection === 'dashboard'">
+            <div class="dashboard-panel-head">
+              <div>
+                <p class="dashboard-panel-kicker">Tipos de avería</p>
+                <h2>Distribución por tipo de problema</h2>
+              </div>
+            </div>
+
+            <p class="dashboard-empty" *ngIf="!kpiProblemTypeSlices.length">
+              Aún no hay datos suficientes para graficar.
+            </p>
+
+            <div class="kpi-donut-layout" *ngIf="kpiProblemTypeSlices.length">
+              <div class="kpi-donut" [style.background]="kpiDonutBackground">
+                <div class="kpi-donut-hole">
+                  <strong>{{ maintenanceRequests.length }}</strong>
+                  <span>Total</span>
+                </div>
+              </div>
+              <ul class="kpi-donut-legend">
+                <li *ngFor="let slice of kpiProblemTypeSlices">
+                  <i [style.background]="slice.color"></i>
+                  <span>{{ slice.label }}</span>
+                  <strong>{{ slice.percent }}%</strong>
+                </li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="dashboard-panel kpi-panel" *ngIf="selectedSection === 'dashboard'">
+            <div class="dashboard-panel-head">
+              <div>
+                <p class="dashboard-panel-kicker">Demanda horaria</p>
+                <h2>Actividad por hora y prioridad</h2>
+              </div>
+            </div>
+
+            <p class="dashboard-empty" *ngIf="!kpiActivityPoints.length">
+              Aún no hay datos suficientes para graficar.
+            </p>
+
+            <div class="kpi-scatter" *ngIf="kpiActivityPoints.length">
+              <div class="kpi-scatter-labels">
+                <span>Alta</span>
+                <span>Media</span>
+                <span>Baja</span>
+              </div>
+              <div class="kpi-scatter-plot">
+                <div
+                  class="kpi-scatter-point"
+                  *ngFor="let point of kpiActivityPoints"
+                  [style.left.%]="point.leftPct"
+                  [style.bottom.%]="point.bottomPct"
+                  [style.width.px]="point.size"
+                  [style.height.px]="point.size"
+                  [style.background]="point.color"
+                  [title]="point.hour + ':00 · ' + point.priority + ' · ' + point.count + ' emergencia(s)'"
+                ></div>
+              </div>
+            </div>
+            <div class="kpi-scatter-axis" *ngIf="kpiActivityPoints.length">
+              <span>0h</span>
+              <span>6h</span>
+              <span>12h</span>
+              <span>18h</span>
+              <span>23h</span>
+            </div>
+          </article>
+
           <article class="dashboard-panel dashboard-panel-accent" *ngIf="selectedSection === 'dashboard'">
             <div class="dashboard-panel-head">
               <div>
@@ -671,14 +816,21 @@ type SucursalFormModel = {
               <a routerLink="/servicios">Ver servicios</a>
             </div>
 
-            <div class="dashboard-list">
-              <article class="dashboard-list-item" *ngFor="let item of requests">
+            <p class="dashboard-empty" *ngIf="!recentActivityItems.length">
+              Aún no hay solicitudes registradas.
+            </p>
+
+            <div class="dashboard-list" *ngIf="recentActivityItems.length">
+              <article class="dashboard-list-item" *ngFor="let item of recentActivityItems">
                 <div class="dashboard-list-copy">
-                  <span class="dashboard-list-priority">{{ item.priority }}</span>
+                  <span class="dashboard-list-priority" [attr.data-priority]="item.priority">{{ item.priority }}</span>
                   <strong>{{ item.title }}</strong>
                   <p>{{ item.subtitle }}</p>
                 </div>
-                <span class="dashboard-list-meta">{{ item.meta }}</span>
+                <div class="dashboard-list-meta-col">
+                  <span class="dashboard-status-pill" [attr.data-status]="item.status">{{ item.status | titlecase }}</span>
+                  <span class="dashboard-list-meta">{{ item.meta }}</span>
+                </div>
               </article>
             </div>
           </article>
@@ -691,11 +843,17 @@ type SucursalFormModel = {
               </div>
             </div>
 
-            <div class="dashboard-coverage">
-              <article class="dashboard-coverage-card">
+            <div class="dashboard-coverage dashboard-coverage-3">
+              <article class="dashboard-coverage-card dashboard-coverage-card-kpi" data-tone="teal">
                 <span>Zonas activas</span>
                 <strong>{{ uniqueZonesCount }}</strong>
                 <p>Areas distintas con sucursales registradas desde el formulario.</p>
+              </article>
+
+              <article class="dashboard-coverage-card dashboard-coverage-card-kpi" data-tone="orange">
+                <span>Emergencias activas</span>
+                <strong>{{ activeEmergenciesCount }}</strong>
+                <p>Solicitudes pendientes o en atención en este momento.</p>
               </article>
 
               <article class="dashboard-coverage-card dashboard-coverage-card-highlight">
@@ -708,11 +866,37 @@ type SucursalFormModel = {
             <div class="dashboard-mini-list" *ngIf="recentSucursales.length">
               <article class="dashboard-mini-item" *ngFor="let sucursal of recentSucursales">
                 <div>
-                  <strong>{{ sucursal.nombre }}</strong>
+                  <strong>
+                    <span class="dashboard-mini-dot" [attr.data-status]="sucursal.operativa ? 'disponible' : 'fuera_de_servicio'"></span>
+                    {{ sucursal.nombre }}
+                  </strong>
                   <p>{{ sucursal.zona || 'Sin zona' }} · {{ sucursal.responsable || 'Sin responsable' }}</p>
                 </div>
                 <span>{{ sucursal.fecha_registro | date: 'shortTime' }}</span>
               </article>
+            </div>
+          </article>
+
+          <article class="dashboard-panel dashboard-panel-wide kpi-panel" *ngIf="selectedSection === 'dashboard'">
+            <div class="dashboard-panel-head">
+              <div>
+                <p class="dashboard-panel-kicker">Desempeño del equipo</p>
+                <h2>Top mecánicos por emergencias atendidas</h2>
+              </div>
+            </div>
+
+            <p class="dashboard-empty" *ngIf="!kpiTopMecanicos.length">
+              Aún no hay mecánicos con emergencias asignadas.
+            </p>
+
+            <div class="kpi-hbars" *ngIf="kpiTopMecanicos.length">
+              <div class="kpi-hbar-row" *ngFor="let mecanico of kpiTopMecanicos">
+                <span class="kpi-hbar-label">{{ mecanico.name }}</span>
+                <div class="kpi-hbar-track">
+                  <div class="kpi-hbar-fill" [style.width.%]="mecanico.pct"></div>
+                </div>
+                <span class="kpi-hbar-value">{{ mecanico.count }}</span>
+              </div>
             </div>
           </article>
 
@@ -733,6 +917,7 @@ type SucursalFormModel = {
             </div>
 
             <p class="dashboard-loading" *ngIf="isEmergenciesLoading">Cargando solicitudes de emergencia...</p>
+            <p class="mecanico-form-feedback" *ngIf="!isEmergenciesLoading && emergencyGlobalFeedback">{{ emergencyGlobalFeedback }}</p>
             <p class="dashboard-empty" *ngIf="!isEmergenciesLoading && !maintenanceRequests.length">
               {{
                 isWorkshopSession
@@ -1064,7 +1249,7 @@ type SucursalFormModel = {
             </div>
           </article>
 
-          <article class="dashboard-panel dashboard-panel-wide" *ngIf="selectedSection === 'workshops'">
+          <article class="dashboard-panel dashboard-panel-wide dashboard-panel-workshops" *ngIf="selectedSection === 'workshops'">
             <div class="dashboard-panel-head">
               <div>
                 <p class="dashboard-panel-kicker">Administración operativa</p>
@@ -1681,6 +1866,21 @@ type SucursalFormModel = {
             </div>
           </article>
         </section>
+
+        <section
+          class="dashboard-stats"
+          *ngIf="selectedSection === 'dashboard' || selectedSection === 'mecanicos' || selectedSection === 'clients'"
+          [class.is-compact]="selectedSection === 'mecanicos' || selectedSection === 'clients'"
+        >
+          <article class="dashboard-stat-card" *ngFor="let stat of stats" [attr.data-tone]="stat.tone">
+            <div class="dashboard-stat-top">
+              <span>{{ stat.label }}</span>
+              <small>{{ stat.trend }}</small>
+            </div>
+            <strong>{{ stat.value }}</strong>
+            <p>{{ stat.detail }}</p>
+          </article>
+        </section>
       </section>
 
       <div class="dashboard-modal-backdrop" *ngIf="showSucursalEditModal" (click)="cancelSucursalEdit()">
@@ -2278,13 +2478,14 @@ type SucursalFormModel = {
   `,
   styleUrl: './shared-pages.css',
 })
-export class DashboardPageComponent implements OnDestroy {
+export class DashboardPageComponent implements OnInit, OnDestroy {
   readonly mecanicoSpecialtyOptions = MECANICO_SPECIALTY_OPTIONS;
   readonly sucursalZoneOptions = WORKSHOP_ZONE_OPTIONS;
   readonly isSecureContext = typeof window !== 'undefined' ? window.isSecureContext : false;
   private readonly http = inject(HttpClient);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly sucursalGql = inject(SucursalGraphqlService);
   private readonly mecanicosApiUrl = `${API_BASE_URL}/mecanicos`;
   private readonly sucursalesApiUrl = `${API_BASE_URL}/sucursales`;
@@ -2297,27 +2498,6 @@ export class DashboardPageComponent implements OnDestroy {
   private emergencyRefreshTimer: number | undefined;
   private generalRefreshTimer: number | undefined;
   private visibilityChangeHandler: (() => void) | undefined;
-
-  readonly requests: DashboardItem[] = [
-    {
-      title: 'Cambio de bateria',
-      subtitle: 'Cliente en Equipetrol, Santa Cruz',
-      meta: 'Hace 8 min',
-      priority: 'Alta',
-    },
-    {
-      title: 'Remolque urbano',
-      subtitle: 'Vehiculo detenido en Av. Banzer',
-      meta: 'Hace 12 min',
-      priority: 'Media',
-    },
-    {
-      title: 'Falta de combustible',
-      subtitle: 'Solicitud desde zona sur',
-      meta: 'Hace 21 min',
-      priority: 'Seguimiento',
-    },
-  ];
 
   maintenanceRequests: MaintenanceRequest[] = [];
   lastSeenPendingEmergencyId = 0;
@@ -2371,6 +2551,7 @@ export class DashboardPageComponent implements OnDestroy {
   private readonly secretariasApiUrl = `${API_BASE_URL}/secretarias`;
   mecanicoFeedback = '';
   emergencyAssignmentFeedback = '';
+  emergencyGlobalFeedback = '';
   sucursalEditFeedback = '';
   clientEditFeedback = '';
   mecanicoFilter: MecanicoFilter = 'activos';
@@ -2460,9 +2641,7 @@ export class DashboardPageComponent implements OnDestroy {
   ];
 
   constructor() {
-    if (this.isWorkshopSession) {
-      this.selectedSection = 'reports';
-    }
+    this.selectedSection = this.getDefaultSectionForRole();
 
     if (this.canRejectEmergencies) {
       this.maintenanceFilter = 'pendiente';
@@ -2476,6 +2655,10 @@ export class DashboardPageComponent implements OnDestroy {
     this.loadSecretarias();
     this.startEmergencyRefresh();
     this.startGeneralRefresh();
+  }
+
+  ngOnInit(): void {
+    this.applySectionFromRoute();
   }
 
   ngOnDestroy(): void {
@@ -2516,7 +2699,7 @@ export class DashboardPageComponent implements OnDestroy {
     }
 
     if (this.selectedSection === 'workshops') {
-      return 'Gestion de Solicitudes';
+      return 'Gestion de Sucursales';
     }
 
     if (this.selectedSection === 'maintenance') {
@@ -2632,29 +2815,69 @@ export class DashboardPageComponent implements OnDestroy {
   canAccessSection(section: DashboardSection): boolean {
     const role = this.adminSession?.role as AppRole | undefined;
 
-    if (role === 'admin') {
-      return true;
+    if (!role) {
+      return false;
     }
 
-    if (role === 'workshop') {
-      return section === 'mecanicos' || section === 'reports';
+    return DASHBOARD_SECTION_ACCESS[role].includes(section);
+  }
+
+  private applySectionFromRoute(): void {
+    const requestedSection = this.route.snapshot.queryParamMap.get('section');
+    const normalizedSection = this.normalizeSection(requestedSection);
+    this.setCurrentSection(normalizedSection);
+
+    if (requestedSection !== normalizedSection) {
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { section: normalizedSection },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
+    }
+  }
+
+  private normalizeSection(section: string | null): DashboardSection {
+    if (section && this.isDashboardSection(section) && this.canAccessSection(section)) {
+      return section;
     }
 
-    if (role === 'secretaria') {
-      return (
-        section === 'dashboard' ||
-        section === 'mecanicos' ||
-        section === 'clients' ||
-        section === 'emergencies' ||
-        section === 'reports'
-      );
+    return this.getDefaultSectionForRole();
+  }
+
+  private isDashboardSection(section: string): section is DashboardSection {
+    return DASHBOARD_SECTIONS.includes(section as DashboardSection);
+  }
+
+  private getDefaultSectionForRole(): DashboardSection {
+    const role = this.adminSession?.role as AppRole | undefined;
+
+    if (!role) {
+      return 'dashboard';
     }
 
-    if (role === 'mecanico') {
-      return section === 'dashboard';
+    return DASHBOARD_SECTION_ACCESS[role][0] ?? 'dashboard';
+  }
+
+  private setCurrentSection(section: DashboardSection): void {
+    this.selectedSection = section;
+
+    if (section === 'mecanicos') {
+      this.loadActiveSucursales();
     }
 
-    return false;
+    if (section === 'secretarias') {
+      this.loadSecretarias();
+      this.loadActiveSucursales();
+    }
+
+    if ((section === 'emergencies' || section === 'reports' || section === 'audit') && !this.maintenanceRequests.length) {
+      this.loadEmergencies();
+    }
+
+    if (section === 'emergencies' && typeof window !== 'undefined') {
+      window.setTimeout(() => this.renderSelectedEmergencyMap());
+    }
   }
 
   get maintenanceRequestsFiltered(): MaintenanceRequest[] {
@@ -2690,6 +2913,303 @@ export class DashboardPageComponent implements OnDestroy {
       { label: 'Activas', value: this.maintenanceRequests.filter((request) => request.status === 'activo').length },
       { label: 'Cerradas', value: this.maintenanceRequests.filter((request) => request.status === 'cerrada').length },
     ];
+  }
+
+  get recentActivityItems(): RecentActivityItem[] {
+    return [...this.maintenanceRequests]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5)
+      .map((request) => ({
+        title: request.standardizedProblemType || request.problemType || 'Emergencia reportada',
+        subtitle: request.location,
+        meta: this.relativeTimeLabel(request.createdAt),
+        priority: request.priority,
+        status: request.status,
+      }));
+  }
+
+  get activeEmergenciesCount(): number {
+    return this.maintenanceRequests.filter((request) => request.status === 'pendiente' || request.status === 'activo').length;
+  }
+
+  private readonly kpiDonutColors = ['#0f6e6b', '#22a6a4', '#f4c635', '#f08c2f', '#3d76d1', '#9d6bd1', '#bd3b32'];
+
+  private get kpiLastSevenDays(): string[] {
+    const days: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setHours(0, 0, 0, 0);
+      date.setDate(date.getDate() - i);
+      days.push(date.toISOString().slice(0, 10));
+    }
+    return days;
+  }
+
+  private kpiDailySeries(
+    valueFn: (request: MaintenanceRequest) => number,
+    filterFn?: (request: MaintenanceRequest) => boolean,
+  ): number[] {
+    const days = this.kpiLastSevenDays;
+    const totals = new Map<string, number>(days.map((day) => [day, 0]));
+
+    for (const request of this.maintenanceRequests) {
+      if (filterFn && !filterFn(request)) {
+        continue;
+      }
+
+      const created = new Date(request.createdAt);
+      if (Number.isNaN(created.getTime())) {
+        continue;
+      }
+
+      const key = created.toISOString().slice(0, 10);
+      if (totals.has(key)) {
+        totals.set(key, (totals.get(key) || 0) + valueFn(request));
+      }
+    }
+
+    return days.map((day) => totals.get(day) || 0);
+  }
+
+  private kpiSparklinePoints(values: number[]): string {
+    const max = Math.max(...values, 1);
+    const stepX = 100 / Math.max(values.length - 1, 1);
+
+    return values
+      .map((value, index) => {
+        const x = index * stepX;
+        const y = 32 - (value / max) * 28;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }
+
+  private kpiTrend(values: number[]): { trend: string; trendUp: boolean } {
+    const recent = values.slice(-3).reduce((total, value) => total + value, 0);
+    const previous = values.slice(0, -3).reduce((total, value) => total + value, 0);
+
+    if (previous === 0) {
+      const trendUp = recent >= 0;
+      return { trend: recent > 0 ? `+${recent}` : '0', trendUp };
+    }
+
+    const change = ((recent - previous) / previous) * 100;
+    const trendUp = change >= 0;
+    return { trend: `${trendUp ? '+' : ''}${change.toFixed(0)}%`, trendUp };
+  }
+
+  get kpiTrendCards(): KpiTrendCard[] {
+    const totalSeries = this.kpiDailySeries(() => 1);
+    const activeSeries = this.kpiDailySeries(
+      () => 1,
+      (request) => request.status === 'pendiente' || request.status === 'activo',
+    );
+    const revenueSeries = this.kpiDailySeries(
+      (request) => this.calculateReportServiceAmount(request.price) ?? 0,
+      (request) => request.status === 'activo',
+    );
+
+    const totalTrend = this.kpiTrend(totalSeries);
+    const activeTrend = this.kpiTrend(activeSeries);
+    const revenueTrend = this.kpiTrend(revenueSeries);
+
+    return [
+      {
+        label: 'Emergencias totales',
+        value: String(this.maintenanceRequests.length),
+        trend: totalTrend.trend,
+        trendUp: totalTrend.trendUp,
+        sparkline: this.kpiSparklinePoints(totalSeries),
+        tone: 'teal',
+      },
+      {
+        label: 'Emergencias activas',
+        value: String(
+          this.maintenanceRequests.filter((request) => request.status === 'pendiente' || request.status === 'activo')
+            .length,
+        ),
+        trend: activeTrend.trend,
+        trendUp: activeTrend.trendUp,
+        sparkline: this.kpiSparklinePoints(activeSeries),
+        tone: 'cyan',
+      },
+      {
+        label: 'Ingresos por comisión',
+        value: this.formatReportPrice(this.reportTotalServiceAmount),
+        trend: revenueTrend.trend,
+        trendUp: revenueTrend.trendUp,
+        sparkline: this.kpiSparklinePoints(revenueSeries),
+        tone: 'gold',
+      },
+    ];
+  }
+
+  get kpiResolutionRate(): number {
+    if (!this.maintenanceRequests.length) {
+      return 0;
+    }
+
+    const closed = this.maintenanceRequests.filter((request) => request.status === 'cerrada').length;
+    return Math.round((closed / this.maintenanceRequests.length) * 100);
+  }
+
+  get kpiResolutionGaugeBackground(): string {
+    const angle = Math.min(180, Math.max(0, this.kpiResolutionRate * 1.8));
+    return `conic-gradient(from 270deg, #f08c2f 0deg ${angle}deg, #e7ecf5 ${angle}deg 180deg, transparent 180deg 360deg)`;
+  }
+
+  get kpiZoneBars(): KpiBarGroup[] {
+    const groups = new Map<string, { pendiente: number; activo: number; cerrada: number; rechazado: number }>();
+
+    for (const request of this.maintenanceRequests) {
+      const name = request.nearestWorkshopName || 'Sin asignar';
+      if (!groups.has(name)) {
+        groups.set(name, { pendiente: 0, activo: 0, cerrada: 0, rechazado: 0 });
+      }
+      groups.get(name)![request.status] += 1;
+    }
+
+    const entries = Array.from(groups.entries())
+      .map(([name, counts]) => ({
+        name,
+        total: counts.pendiente + counts.activo + counts.cerrada + counts.rechazado,
+        ...counts,
+      }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+
+    const max = Math.max(...entries.map((entry) => entry.total), 1);
+
+    return entries.map((entry) => ({
+      name: entry.name,
+      total: entry.total,
+      pendientePct: (entry.pendiente / max) * 100,
+      activoPct: (entry.activo / max) * 100,
+      cerradaPct: (entry.cerrada / max) * 100,
+      rechazadoPct: (entry.rechazado / max) * 100,
+    }));
+  }
+
+  get kpiTopSucursales(): KpiTopRow[] {
+    const groups = new Map<string, { total: number; revenue: number; zone: string }>();
+
+    for (const request of this.maintenanceRequests) {
+      const name = request.nearestWorkshopName || 'Sin asignar';
+
+      if (!groups.has(name)) {
+        const sucursal = this.sucursales.find(
+          (item) => item.id === request.nearestWorkshopId || item.nombre === name,
+        );
+        groups.set(name, { total: 0, revenue: 0, zone: sucursal?.zona || '-' });
+      }
+
+      const group = groups.get(name)!;
+      group.total += 1;
+
+      if (request.status === 'activo' || request.status === 'cerrada') {
+        group.revenue += this.calculateReportNetAmount(request.price) ?? 0;
+      }
+    }
+
+    return Array.from(groups.entries())
+      .map(([name, group]) => ({ name, zone: group.zone, total: group.total, revenue: group.revenue }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+  }
+
+  get kpiProblemTypeSlices(): KpiDonutSlice[] {
+    const counts = new Map<string, number>();
+
+    for (const request of this.maintenanceRequests) {
+      const label = (request.standardizedProblemType || request.problemType || 'Otro').trim() || 'Otro';
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+
+    const total = this.maintenanceRequests.length || 1;
+
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value], index) => ({
+        label,
+        value,
+        percent: Math.round((value / total) * 100),
+        color: this.kpiDonutColors[index % this.kpiDonutColors.length],
+      }));
+  }
+
+  get kpiDonutBackground(): string {
+    const slices = this.kpiProblemTypeSlices;
+
+    if (!slices.length) {
+      return '#e7ecf5';
+    }
+
+    const total = this.maintenanceRequests.length || 1;
+    let cursor = 0;
+    const stops: string[] = [];
+
+    for (const slice of slices) {
+      const start = cursor;
+      cursor += (slice.value / total) * 360;
+      stops.push(`${slice.color} ${start.toFixed(2)}deg ${cursor.toFixed(2)}deg`);
+    }
+
+    return `conic-gradient(${stops.join(', ')})`;
+  }
+
+  get kpiActivityPoints(): KpiActivityPoint[] {
+    const buckets = new Map<string, number>();
+
+    for (const request of this.maintenanceRequests) {
+      const created = new Date(request.createdAt);
+      if (Number.isNaN(created.getTime())) {
+        continue;
+      }
+
+      const key = `${created.getHours()}-${request.priority}`;
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+
+    const priorityRows: Record<string, number> = { Alta: 80, Media: 50, Baja: 20 };
+    const priorityColors: Record<string, string> = { Alta: '#bd3b32', Media: '#f4c635', Baja: '#22a6a4' };
+    const maxCount = Math.max(...Array.from(buckets.values()), 1);
+
+    return Array.from(buckets.entries()).map(([key, count]) => {
+      const [hourLabel, priority] = key.split('-');
+      const hour = Number(hourLabel);
+
+      return {
+        hour,
+        leftPct: (hour / 23) * 100,
+        bottomPct: priorityRows[priority] ?? 50,
+        size: 14 + (count / maxCount) * 26,
+        color: priorityColors[priority] ?? '#3d76d1',
+        count,
+        priority,
+      };
+    });
+  }
+
+  get kpiTopMecanicos(): KpiHBar[] {
+    const counts = new Map<string, number>();
+
+    for (const request of this.maintenanceRequests) {
+      if (!request.assignedMecanicoName) {
+        continue;
+      }
+      if (request.status !== 'activo' && request.status !== 'cerrada') {
+        continue;
+      }
+      counts.set(request.assignedMecanicoName, (counts.get(request.assignedMecanicoName) || 0) + 1);
+    }
+
+    const entries = Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+
+    const max = Math.max(...entries.map(([, count]) => count), 1);
+
+    return entries.map(([name, count]) => ({ name, count, pct: (count / max) * 100 }));
   }
 
   get pendingEmergencyNotifications(): number {
@@ -2925,7 +3445,7 @@ export class DashboardPageComponent implements OnDestroy {
           this.closeEmergencyRejectModal();
           this.closeEmergencyModal();
           this.loadEmergencies();
-          window.alert('Emergencia rechazada y cliente notificado.');
+          this.emergencyGlobalFeedback = 'Emergencia rechazada y cliente notificado.';
         },
         error: (error) => {
           this.rejectionSubmitting = false;
@@ -3006,6 +3526,7 @@ export class DashboardPageComponent implements OnDestroy {
     }
 
     this.isUpdatingEmergencyStatus = true;
+    this.emergencyGlobalFeedback = ''; 
 
     this.http
       .put<EmergencyReport>(
@@ -3033,7 +3554,7 @@ export class DashboardPageComponent implements OnDestroy {
         },
         error: (error) => {
           this.isUpdatingEmergencyStatus = false;
-          window.alert(this.extractHttpErrorMessage(error, 'No se pudo actualizar el estado de la emergencia.'));
+          this.emergencyGlobalFeedback = this.extractHttpErrorMessage(error, 'No se pudo actualizar el estado de la emergencia.');
         },
       });
   }
@@ -3100,6 +3621,7 @@ export class DashboardPageComponent implements OnDestroy {
     }
 
     this.isUpdatingEmergencyStatus = true;
+    this.emergencyGlobalFeedback = ''; 
 
     this.http
       .delete(`${this.emergenciesApiUrl}/${selected.id}`, {
@@ -3113,7 +3635,7 @@ export class DashboardPageComponent implements OnDestroy {
         },
         error: () => {
           this.isUpdatingEmergencyStatus = false;
-          window.alert('No se pudo eliminar la emergencia.');
+          this.emergencyGlobalFeedback = 'No se pudo eliminar la emergencia.';
         },
       });
   }
@@ -3250,6 +3772,7 @@ export class DashboardPageComponent implements OnDestroy {
     }
 
     this.isResolvingEmergencyRecepcion = true;
+    this.emergencyGlobalFeedback = ''; 
 
     this.http.get<{ id: number }>(`${this.emergenciesApiUrl}/${selected.id}/ficha-recepcion`).subscribe({
       next: async (detail) => {
@@ -3264,7 +3787,7 @@ export class DashboardPageComponent implements OnDestroy {
           return;
         }
 
-        window.alert(this.extractHttpErrorMessage(error, 'No se pudo abrir la ficha de recepción.'));
+        this.emergencyGlobalFeedback = this.extractHttpErrorMessage(error, 'No se pudo abrir la ficha de recepción.');
       },
     });
   }
@@ -4116,30 +4639,23 @@ export class DashboardPageComponent implements OnDestroy {
 
   selectSection(section: DashboardSection): void {
     if (!this.canAccessSection(section)) {
-      this.selectedSection = this.isWorkshopSession ? 'reports' : 'dashboard';
+      const fallbackSection = this.getDefaultSectionForRole();
+      this.setCurrentSection(fallbackSection);
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { section: fallbackSection },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
       return;
     }
 
-    this.selectedSection = section;
-
-    if (section === 'mecanicos') {
-      this.loadActiveSucursales();
-    }
-
-    if (section === 'secretarias') {
-      this.loadSecretarias();
-      this.loadActiveSucursales();
-    }
-
-    if ((section === 'emergencies' || section === 'reports' || section === 'audit') && !this.maintenanceRequests.length) {
-      this.loadEmergencies();
-    }
-
-    if (section === 'emergencies') {
-      if (typeof window !== 'undefined') {
-        window.setTimeout(() => this.renderSelectedEmergencyMap());
-      }
-    }
+    this.setCurrentSection(section);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { section },
+      queryParamsHandling: 'merge',
+    });
   }
 
   toggleSidebar(): void {
@@ -4707,15 +5223,22 @@ export class DashboardPageComponent implements OnDestroy {
   loadSucursales(): void {
     this.isLoading = true;
 
-    this.sucursalGql.listarSucursales().subscribe({
+    this.http.get<SucursalApiResponse[]>(this.sucursalesApiUrl).subscribe({
       next: (sucursales) => {
-        this.sucursales = sucursales;
+        this.sucursales = sucursales.map((sucursal, index) => this.normalizeSucursal(sucursal, index));
         this.sucursalesPage = 1;
         this.isLoading = false;
         this.loadActiveSucursales();
         this.refreshStats();
       },
-      error: () => {
+      error: (error) => {
+        console.error('DashboardPageComponent: error al cargar sucursales', {
+          endpoint: this.sucursalesApiUrl,
+          status: error?.status,
+          statusText: error?.statusText,
+          detail: error?.error,
+          message: error?.message,
+        });
         this.sucursales = [];
         this.sucursalesPage = 1;
         this.isLoading = false;
@@ -4729,12 +5252,12 @@ export class DashboardPageComponent implements OnDestroy {
     this.isActiveSucursalesLoading = true;
 
     this.http
-      .get<Sucursal[]>(this.sucursalesApiUrl, {
+      .get<SucursalApiResponse[]>(this.sucursalesApiUrl, {
         params: { estado: 'ACTIVO' },
       })
       .subscribe({
         next: (sucursales) => {
-          this.activeSucursales = sucursales;
+          this.activeSucursales = sucursales.map((sucursal, index) => this.normalizeSucursal(sucursal, index));
           this.isActiveSucursalesLoading = false;
 
           if (
@@ -4747,7 +5270,14 @@ export class DashboardPageComponent implements OnDestroy {
             };
           }
         },
-        error: () => {
+        error: (error) => {
+          console.error('DashboardPageComponent: error al cargar sucursales activas', {
+            endpoint: this.sucursalesApiUrl,
+            status: error?.status,
+            statusText: error?.statusText,
+            detail: error?.error,
+            message: error?.message,
+          });
           this.activeSucursales = [];
           this.isActiveSucursalesLoading = false;
         },
@@ -4798,7 +5328,7 @@ export class DashboardPageComponent implements OnDestroy {
 
     this.http.get<Client[]>(this.clientsApiUrl).subscribe({
       next: (clients) => {
-        this.clients = clients;
+        this.clients = clients.filter((client) => this.isRealClientRole(client.role));
         this.isClientsLoading = false;
         this.refreshStats();
       },
@@ -4937,6 +5467,76 @@ export class DashboardPageComponent implements OnDestroy {
     }
 
     return session;
+  }
+
+  private normalizeSucursal(raw: SucursalApiResponse, index = 0): Sucursal {
+    const latitud = this.normalizeSucursalCoordinate(raw.latitud, raw.latitude, raw.lat);
+    const longitud = this.normalizeSucursalCoordinate(raw.longitud, raw.longitude, raw.lng);
+    const normalizedEstado = raw.estado === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO';
+
+    return {
+      id: this.normalizeSucursalId(raw.id, index),
+      nombre: this.pickSucursalText(raw.nombre) || `Sucursal ${index + 1}`,
+      direccion: this.pickSucursalText(raw.direccion) || 'Sin dirección',
+      zona: this.pickSucursalText(raw.zona),
+      telefono: this.pickSucursalText(raw.telefono),
+      email: this.pickSucursalText(raw.email),
+      latitud,
+      longitud,
+      horario_atencion: this.pickSucursalText(raw.horario_atencion),
+      responsable: this.pickSucursalText(raw.responsable),
+      estado: normalizedEstado,
+      fecha_registro: this.pickSucursalText(raw.fecha_registro) || '',
+      fecha_modificacion: this.pickSucursalText(raw.fecha_modificacion),
+      mecanicos_activos_count: typeof raw.mecanicos_activos_count === 'number' ? raw.mecanicos_activos_count : undefined,
+      secretarias_activas_count: typeof raw.secretarias_activas_count === 'number' ? raw.secretarias_activas_count : undefined,
+      operativa: typeof raw.operativa === 'boolean' ? raw.operativa : undefined,
+      motivo_no_operativa: this.pickSucursalText(raw.motivo_no_operativa) ?? undefined,
+    };
+  }
+
+  private normalizeSucursalCoordinate(...values: Array<number | string | null | undefined>): number | null {
+    for (const value of values) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+      }
+
+      if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeSucursalId(value: number | string | null | undefined, index: number): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return index + 1;
+  }
+
+  private pickSucursalText(value?: string | null): string | null {
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  private normalizeClientRole(role: string | null | undefined): string {
+    return typeof role === 'string' ? role.trim().toLowerCase() : '';
+  }
+
+  private isRealClientRole(role: string | null | undefined): boolean {
+    return CLIENT_ROLES.has(this.normalizeClientRole(role));
   }
 
   private refreshStats(): void {
